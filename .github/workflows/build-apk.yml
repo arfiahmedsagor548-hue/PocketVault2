@@ -1,0 +1,65 @@
+name: Build PocketVault Debug APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Find & Extract Any Uploaded ZIP + Auto-Repair Strings
+        run: |
+          ls -la
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+          if [ -n "$ZIP_FILE" ] && [ ! -f "settings.gradle.kts" ]; then
+            echo "Found ZIP archive: $ZIP_FILE — extracting..."
+            unzip -q -o "$ZIP_FILE"
+          fi
+          if [ -d "PocketVault" ] && [ ! -f "settings.gradle.kts" ]; then
+            cp -r PocketVault/* .
+          fi
+          if [ ! -f "settings.gradle.kts" ]; then
+            echo "ERROR: No PocketVault ZIP found in repository! Upload PocketVault_Android_Project.zip in the Code tab."
+            exit 1
+          fi
+          python3 - << 'EOF'
+          from pathlib import Path
+          for kt in Path(".").rglob("*.kt"):
+              txt = kt.read_text(encoding="utf-8")
+              fixed = txt.replace('\n" +', '\\n" +')
+              if fixed != txt:
+                  kt.write_text(fixed, encoding="utf-8")
+          for xml in Path(".").rglob("strings.xml"):
+              txt = xml.read_text(encoding="utf-8")
+              fixed = txt.replace('"PocketVault Backups"', '\\"PocketVault Backups\\"')
+              if fixed != txt:
+                  xml.write_text(fixed, encoding="utf-8")
+          EOF
+
+      - name: 3. Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 4. Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: 5. Assemble Installable Debug APK
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ./PocketVault-debug.apk
+
+      - name: 6. Upload Ready-to-Install APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketVault-debug-apk
+          path: PocketVault-debug.apk
+          if-no-files-found: error
